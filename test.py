@@ -73,7 +73,12 @@ PCF_fct = factorCF_df[['trade_date','stock_code','PCF']].copy()
 VCF_fct = factorCF_df[['trade_date','stock_code','VCF']].copy()
 ACF_fct = factorCF_df[['trade_date','stock_code','ACF']].copy()
 TRCF_fct = factorCF_df[['trade_date','stock_code','TRCF']].copy()
-TRCF_fct['TRCF'] = -1 * TRCF_fct['TRCF']
+TRCF_fct['TRCF'] = TRCF_fct['TRCF']
+
+
+# get factor corr
+
+
 # bp_df = pd.read_csv('./data/pb.csv')
 # ret_df=pd.read_csv("F:\\quant_factor\\factor_backtest-main\\data\\MAfct_data\\ret_10D.csv")
 
