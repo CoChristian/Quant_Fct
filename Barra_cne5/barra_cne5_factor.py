@@ -1,4 +1,5 @@
 # import pandas_market_calendars as mcal
+import os
 import pandas as pd
 from datetime import datetime, timedelta
 import akshare as ak
@@ -8,6 +9,10 @@ from scipy.stats import zscore
 
 START_DATE = '20150101'
 END_DATE = '20251014'
+File_Path_Juqing = "F:\\work\\Data\\Database_to_csv\\"
+File_Path_HomeCp = ("F:\\ECO\\Database_fromJQ\\Database_to_csv\\")
+File_Path = File_Path_HomeCp
+
 
 def getdatetimecol(df):
     if 'date' in df.columns:
@@ -26,8 +31,8 @@ def getdatetimecol(df):
     return df
 
 class GetData():
-    def __init__(self):
-        pass
+
+
         # self.MARKET_DATA = getdatetimecol(pd.read_csv("F:\\quant_factor\\factor_backtest-main\\data\\MAfct_data\\index.csv"))
         # self.PRICE_DATA = getdatetimecol(pd.read_csv("F:\\work\\Data\\Database_to_csv\\stock_price_history_total\\stock_price_history251014.csv"))
         # self.INDUS_DATA = getdatetimecol(pd.read_csv("F:\\work\\Data\\Database_to_csv\\industry_total\\industry251015.csv"))
@@ -37,23 +42,23 @@ class GetData():
 
     @staticmethod
     def _get_price_():
-        return getdatetimecol(pd.read_csv("F:\\work\\Data\\Database_to_csv\\stock_price_history_total\\stock_price_history251014.csv"))
+        return getdatetimecol(pd.read_csv(File_Path + "stock_price_history_total\\stock_price_history251014.csv"))
 
     @staticmethod
     def _get_ind_():
-        return getdatetimecol(pd.read_csv("F:\\work\\Data\\Database_to_csv\\industry_total\\industry251015.csv"))
+        return getdatetimecol(pd.read_csv(File_Path + "industry_total\\industry251015.csv"))
 
     @staticmethod
     def _get_status():
-        return getdatetimecol(pd.read_csv("F:\\work\\Data\\Database_to_csv\\stock_status_total\\stock_status251015.csv"))
+        return getdatetimecol(pd.read_csv(File_Path + "stock_status_total\\stock_status251015.csv"))
 
     @staticmethod
     def _get_index():
-        return getdatetimecol(pd.read_csv("F:\\work\\Data\\Database_to_csv\\index_price_history_total\\index_price_history251015.csv"))
+        return getdatetimecol(pd.read_csv(File_Path + "index_price_history_total\\index_price_history251015.csv"))
 
     @staticmethod
     def _get_valuation():
-        return getdatetimecol(pd.read_csv("F:\\work\\Data\\Database_to_csv\\valuation_total\\valuation251014.csv"))
+        return getdatetimecol(pd.read_csv(File_Path + "valuation_total\\valuation251014.csv"))
 
     @staticmethod
     def risk_free(START_DATE, END_DATE):
@@ -64,22 +69,27 @@ class GetData():
         current_df_start_time = datetime.strptime(START_DATE, "%Y%m%d")
         end_date_time = datetime.strptime(END_DATE, "%Y%m%d")
         yield10yr_df = pd.DataFrame()
+        if os.path.exists(File_Path + "rf\\risk_free.csv"):
+            yield10yr_df = pd.read_csv(File_Path + "rf\\risk_free.csv")
+        else:
+            while current_df_start_time < end_date_time:
+                cal_end_date = current_df_start_time + timedelta(days=365)
+                while cal_end_date.day != 31:
+                    cal_end_date = cal_end_date - timedelta(days=1)
+                current_df_end_time = min(cal_end_date, end_date_time)
 
-        while current_df_start_time < end_date_time:
-            current_df_end_time = min(current_df_start_time + timedelta(days=365), end_date_time)
+                bond_china_yield_df = ak.bond_china_yield(
+                    start_date=current_df_start_time.strftime("%Y%m%d"),
+                    end_date=current_df_end_time.strftime("%Y%m%d")
+                )
 
-            bond_china_yield_df = ak.bond_china_yield(
-                start_date=current_df_start_time.strftime("%Y%m%d"),
-                end_date=current_df_end_time.strftime("%Y%m%d")
-            )
+                filtered_df = bond_china_yield_df[
+                    (bond_china_yield_df['曲线名称'] == '中债国债收益率曲线')
+                ][['日期', '10年']]
 
-            filtered_df = bond_china_yield_df[
-                (bond_china_yield_df['曲线名称'] == '中债国债收益率曲线')
-            ][['日期', '10年']]
+                yield10yr_df = pd.concat([yield10yr_df, filtered_df])
 
-            yield10yr_df = pd.concat([yield10yr_df, filtered_df])
-
-            current_df_start_time = current_df_end_time + timedelta(days=1)
+                current_df_start_time = current_df_end_time + timedelta(days=1)
 
         yield10yr_df.reset_index(drop=True, inplace=True)
         yield10yr_df['RF_RETURN_ANN'] = yield10yr_df['10年'] / 100
@@ -254,14 +264,14 @@ class Beta(Calculation):
         exp_weight = self._exp_weight(window=252, half_life=63)
         df['ALPHA'] = np.nan
         df['BETA'] = np.nan
-
+        df
         grouped = df.groupby('stock_code', group_keys=False)
 
         # def cal_WLS_beta_alpha(df):
         #     df
 
         for stock_code, group in grouped:
-            if group[group['trade_date'] > '2010-01-01'].empty:
+            if group[group['trade_date'] > pd.to_datetime('2010-01-01').date()].empty:
                 continue
 
             elif len(group) < 252:
