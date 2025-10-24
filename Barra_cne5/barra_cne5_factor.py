@@ -27,6 +27,8 @@ def getdatetimecol(df):
 
 class GetData():
     def __init__(self):
+        self.FILE_PATH_lap = "D:\\quant\\DatabaseJuqing\\Database_to_csv\\"
+        self.FILE_PATH_Juqing = "F:\\work\\Data\\Database_to_csv\\"
         pass
         # self.MARKET_DATA = getdatetimecol(pd.read_csv("F:\\quant_factor\\factor_backtest-main\\data\\MAfct_data\\index.csv"))
         # self.PRICE_DATA = getdatetimecol(pd.read_csv("F:\\work\\Data\\Database_to_csv\\stock_price_history_total\\stock_price_history251014.csv"))
@@ -37,11 +39,11 @@ class GetData():
 
     @staticmethod
     def _get_price_():
-        return getdatetimecol(pd.read_csv("F:\\work\\Data\\Database_to_csv\\stock_price_history_total\\stock_price_history251014.csv"))
+        return getdatetimecol(pd.read_csv(self.FILE_PATH_lap + "stock_price_history_total\\stock_price_history251014.csv"))
 
     @staticmethod
     def _get_ind_():
-        return getdatetimecol(pd.read_csv("F:\\work\\Data\\Database_to_csv\\industry_total\\industry251015.csv"))
+        return getdatetimecol(pd.read_csv(self.FILE_PATH_lap + "industry_total\\industry251015.csv"))
 
     @staticmethod
     def _get_status():
