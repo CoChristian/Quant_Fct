@@ -6,8 +6,98 @@ import numpy as np
 import statsmodels.api as sm
 from scipy.stats import zscore
 
-index_data = pd.read_csv("F:\\quant_factor\\factor_backtest-main\\data\\MAfct_data\\index.csv")
-ohlcvm_df = pd.read_csv("F:\\work\\Data\\Database_to_csv\\stock_price_history_total\\stock_price_history251014.csv")
+START_DATE = '20150101'
+END_DATE = '20251014'
+
+def getdatetimecol(df):
+    if 'date' in df.columns:
+        df['datetime'] = pd.to_datetime(df['date'])
+    elif 'day' in df.columns:
+        df['datetime'] = pd.to_datetime(df['day'])
+    else:
+        return None
+    df['trade_date'] = df['datetime'].dt.date
+    df['month'] = df['datetime'].dt.month
+    df['week'] = df['datetime'].dt.isocalendar().week
+    df['year'] = df['datetime'].dt.year
+    df['stock_code'] = df['code']
+    df = df.sort_values(by = ['trade_date','stock_code'],ascending=True).copy()
+    df = df.drop_duplicates(subset=['trade_date','stock_code'], keep='first')
+    return df
+
+class GetData():
+    def __init__(self):
+        pass
+        # self.MARKET_DATA = getdatetimecol(pd.read_csv("F:\\quant_factor\\factor_backtest-main\\data\\MAfct_data\\index.csv"))
+        # self.PRICE_DATA = getdatetimecol(pd.read_csv("F:\\work\\Data\\Database_to_csv\\stock_price_history_total\\stock_price_history251014.csv"))
+        # self.INDUS_DATA = getdatetimecol(pd.read_csv("F:\\work\\Data\\Database_to_csv\\industry_total\\industry251015.csv"))
+        # self.STATUS_DATA = getdatetimecol(pd.read_csv("F:\\work\\Data\\Database_to_csv\\stock_status_total\\stock_status251015.csv"))
+        # self.INDEX_DATA = getdatetimecol(pd.read_csv("F:\\work\\Data\\Database_to_csv\\index_price_history_total\\index_price_history251015.csv"))
+        # self.VALUATION_DATA = getdatetimecol(pd.read_csv("F:\\work\\Data\\Database_to_csv\\valuation_total\\valuation251014.csv"))
+
+    @staticmethod
+    def _get_price_():
+        return getdatetimecol(pd.read_csv("F:\\work\\Data\\Database_to_csv\\stock_price_history_total\\stock_price_history251014.csv"))
+
+    @staticmethod
+    def _get_ind_():
+        return getdatetimecol(pd.read_csv("F:\\work\\Data\\Database_to_csv\\industry_total\\industry251015.csv"))
+
+    @staticmethod
+    def _get_status():
+        return getdatetimecol(pd.read_csv("F:\\work\\Data\\Database_to_csv\\stock_status_total\\stock_status251015.csv"))
+
+    @staticmethod
+    def _get_index():
+        return getdatetimecol(pd.read_csv("F:\\work\\Data\\Database_to_csv\\index_price_history_total\\index_price_history251015.csv"))
+
+    @staticmethod
+    def _get_valuation():
+        return getdatetimecol(pd.read_csv("F:\\work\\Data\\Database_to_csv\\valuation_total\\valuation251014.csv"))
+
+    @staticmethod
+    def risk_free(START_DATE, END_DATE):
+        """
+        获取无风险利率（十年国债收益率）
+        :return: 无风险利率数据框 格式：日期，年化收益
+        """
+        current_df_start_time = datetime.strptime(START_DATE, "%Y%m%d")
+        end_date_time = datetime.strptime(END_DATE, "%Y%m%d")
+        yield10yr_df = pd.DataFrame()
+
+        while current_df_start_time < end_date_time:
+            current_df_end_time = min(current_df_start_time + timedelta(days=365), end_date_time)
+
+            bond_china_yield_df = ak.bond_china_yield(
+                start_date=current_df_start_time.strftime("%Y%m%d"),
+                end_date=current_df_end_time.strftime("%Y%m%d")
+            )
+
+            filtered_df = bond_china_yield_df[
+                (bond_china_yield_df['曲线名称'] == '中债国债收益率曲线')
+            ][['日期', '10年']]
+
+            yield10yr_df = pd.concat([yield10yr_df, filtered_df])
+
+            current_df_start_time = current_df_end_time + timedelta(days=1)
+
+        yield10yr_df.reset_index(drop=True, inplace=True)
+        yield10yr_df['RF_RETURN_ANN'] = yield10yr_df['10年'] / 100
+        yield10yr_df['datetime'] = pd.to_datetime(yield10yr_df['日期'])
+        yield10yr_df['RF_RETURN'] = (1 + yield10yr_df['RF_RETURN_ANN']) ** (1 / 252) - 1
+        yield10yr_df['trade_date'] = yield10yr_df['datetime'].dt.date
+        yield10yr_df['month'] = yield10yr_df['datetime'].dt.month
+        yield10yr_df['week'] = yield10yr_df['datetime'].dt.isocalendar().week
+        yield10yr_df['year'] = yield10yr_df['datetime'].dt.year
+
+        rf = yield10yr_df[['trade_date', 'RF_RETURN']]
+
+        return rf
+
+
+
+
+
 
 class Calculation:
     """
@@ -133,9 +223,10 @@ class Beta(Calculation):
                     - 'S_DQ_CLOSE': 收盘价 例: 10.5
                     - 'S_DQ_PRECLOSE': 前一日收盘价 例: 10.0
         """
-        self.rf_df = GetData.risk_free()
-        self.csi_df = GetData.mkt_index('000985.CSI')
-        self.csi_df['trade_date'] = pd.to_datetime(self.csi_df['date'])
+        self.rf_df = GetData.risk_free(START_DATE, END_DATE)
+        self.csi_df = GetData._get_index()
+        self.csi_df = self.csi_df[self.csi_df['stock_code']=='000985.XSHG']
+        # self.csi_df['trade_date'] = pd.to_datetime(self.csi_df['date'])
         self.csi_df['MKT_RETURN'] = self.csi_df['close'] / self.csi_df['pre_close'].shift() - 1
         self.csi_df['MKT_RETURN'] = self.csi_df['MKT_RETURN'].astype(float)
         self.beta_df = self.BETA(df)
@@ -155,22 +246,22 @@ class Beta(Calculation):
         df['STOCK_RETURN'] = df['STOCK_RETURN'].astype('float')
 
         # 合并市场收益
-        df = df.merge(self.csi_df[['TRADE_DT', 'MKT_RETURN']], on='TRADE_DT', how='left')
+        df = df.merge(self.csi_df[['trade_date', 'MKT_RETURN']], on='trade_date', how='left')
         # 合并无风险收益
         if 'RF_RETURN' not in df.columns:
-            df = df.merge(self.rf_df, on='TRADE_DT', how='left')
+            df = df.merge(self.rf_df, on='trade_date', how='left')
 
         exp_weight = self._exp_weight(window=252, half_life=63)
         df['ALPHA'] = np.nan
         df['BETA'] = np.nan
 
-        grouped = df.grouby('code', group_keys=False)
+        grouped = df.groupby('stock_code', group_keys=False)
 
-        def cal_WLS_beta_alpha(df):
-            df
+        # def cal_WLS_beta_alpha(df):
+        #     df
 
         for stock_code, group in grouped:
-            if group[group['TRADE_DT'] > '2010-01-01'].empty:
+            if group[group['trade_date'] > '2010-01-01'].empty:
                 continue
 
             elif len(group) < 252:
@@ -199,36 +290,42 @@ class Beta(Calculation):
         return df
 
 
-def risk_free():
-    """
-    获取无风险利率（十年国债收益率）
-    :return: 无风险利率数据框 格式：日期，年化收益
-    """
-    current_df_start_time = datetime.strptime(START_DATE, "%Y%m%d")
-    end_date_time = datetime.strptime(END_DATE, "%Y%m%d")
-    yield10yr_df = pd.DataFrame()
+# def risk_free():
+#     """
+#     获取无风险利率（十年国债收益率）
+#     :return: 无风险利率数据框 格式：日期，年化收益
+#     """
+#     current_df_start_time = datetime.strptime(START_DATE, "%Y%m%d")
+#     end_date_time = datetime.strptime(END_DATE, "%Y%m%d")
+#     yield10yr_df = pd.DataFrame()
+#
+#     while current_df_start_time < end_date_time:
+#         current_df_end_time = min(current_df_start_time + timedelta(days=365), end_date_time)
+#
+#         bond_china_yield_df = ak.bond_china_yield(
+#             start_date=current_df_start_time.strftime("%Y%m%d"),
+#             end_date=current_df_end_time.strftime("%Y%m%d")
+#         )
+#
+#         filtered_df = bond_china_yield_df[
+#             (bond_china_yield_df['曲线名称'] == '中债国债收益率曲线')
+#         ][['日期', '10年']]
+#
+#         yield10yr_df = pd.concat([yield10yr_df, filtered_df])
+#
+#         current_df_start_time = current_df_end_time + timedelta(days=1)
+#
+#     yield10yr_df.reset_index(drop=True, inplace=True)
+#     yield10yr_df['RF_RETURN_ANN'] = yield10yr_df['10年'] / 100
+#     yield10yr_df['TRADE_DT'] = pd.to_datetime(yield10yr_df['日期'])
+#     yield10yr_df['RF_RETURN'] = (1 + yield10yr_df['RF_RETURN_ANN']) ** (1 / 252) - 1
+#
+#     rf = yield10yr_df[['TRADE_DT', 'RF_RETURN']]
+#
+#     return rf
 
-    while current_df_start_time < end_date_time:
-        current_df_end_time = min(current_df_start_time + timedelta(days=365), end_date_time)
-
-        bond_china_yield_df = ak.bond_china_yield(
-            start_date=current_df_start_time.strftime("%Y%m%d"),
-            end_date=current_df_end_time.strftime("%Y%m%d")
-        )
-
-        filtered_df = bond_china_yield_df[
-            (bond_china_yield_df['曲线名称'] == '中债国债收益率曲线')
-        ][['日期', '10年']]
-
-        yield10yr_df = pd.concat([yield10yr_df, filtered_df])
-
-        current_df_start_time = current_df_end_time + timedelta(days=1)
-
-    yield10yr_df.reset_index(drop=True, inplace=True)
-    yield10yr_df['RF_RETURN_ANN'] = yield10yr_df['10年'] / 100
-    yield10yr_df['TRADE_DT'] = pd.to_datetime(yield10yr_df['日期'])
-    yield10yr_df['RF_RETURN'] = (1 + yield10yr_df['RF_RETURN_ANN']) ** (1 / 252) - 1
-
-    rf = yield10yr_df[['TRADE_DT', 'RF_RETURN']]
-
-    return rf
+if __name__ == '__main__':
+    total_data = GetData._get_price_()
+    Beta_data = Beta(total_data)
+    beta_df = Beta_data.beta_df
+    print("test")
