@@ -47,7 +47,7 @@ except Exception as e:
 # 示例2：从 quantdb_time_sliced 数据库读取数据
 # read all data
 # price_history_data
-prefix = 'industry'
+prefix = 'indicator'
 df_vertical = pd.DataFrame()
 
 # 构建一次性查询所有表的SQL
