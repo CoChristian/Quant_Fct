@@ -55,7 +55,7 @@ table_names = [f"{prefix}{i:02d}" for i in range(5, 26)]
 union_queries = []
 
 for table_name in table_names:
-    union_queries.append(f"SELECT *, '{table_name}' as source_table FROM {table_name}")
+    union_queries.append(f"SELECT DISTINCT, '{table_name}' as source_table FROM {table_name}")
 
 # 一次性查询所有数据
 combined_query = " UNION ALL ".join(union_queries)

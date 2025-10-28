@@ -61,6 +61,14 @@ class GetData():
         return getdatetimecol(pd.read_csv(File_Path + "valuation_total\\valuation251014.csv"))
 
     @staticmethod
+    def _get_income():
+        return getdatetimecol(pd.read_csv(File_Path + "income_total\\income251028.csv"))
+
+    @staticmethod
+    def _get_cashflow():
+        return getdatetimecol(pd.read_csv(File_Path + "cashflow_total\\cashflow251028.csv"))
+
+    @staticmethod
     def risk_free(START_DATE, END_DATE):
         """
         获取无风险利率（十年国债收益率）
@@ -602,6 +610,86 @@ class ResidualVolatility(Calculation):
 
         return df
 
+class growth(GetData, Calculation):
+    """
+    计算股票增长因子的类，基于销售增长率（SGRO）和每股收益增长率（EGRO）的回归结果计算综合增长因子 GROWTH。
+
+    :param df: 股票数据的 DataFrame，需包含以下列：
+                - 'S_INFO_WINDCODE': 股票代码
+                - 'TRADE_DT': 交易日期
+    """
+
+    def __init__(self, df):
+        """
+        初始化 Growth 类，获取所有股票的财务指标数据，并处理缺失值。
+
+        :param df: 股票数据的 DataFrame
+        """
+        self.df = df
+        self.growth_df = GetData.financialid_all()
+        # 只保留财务日期和公告日期相差小于一年的记录
+        self.growth_df['ANN_DT'] = pd.to_datetime(self.growth_df['ANN_DT'])
+        self.growth_df['REPORT_PERIOD'] = pd.to_datetime(self.growth_df['REPORT_PERIOD'])
+        self.growth_df = self.growth_df[(self.growth_df['ANN_DT'] - self.growth_df['REPORT_PERIOD']) < pd.Timedelta(days=365)]
+        # 处理空值，先向后填充再截面均值填充
+        self.growth_df['S_FA_GRPS'] = self.growth_df.groupby('S_INFO_WINDCODE')['S_FA_GRPS'].ffill()
+        self.growth_df['S_FA_GRPS'] = self.growth_df.groupby('REPORT_PERIOD')['S_FA_GRPS'].transform(
+            lambda x: x.fillna(x.mean()))
+        self.growth_df['S_FA_EPS_BASIC'] = self.growth_df.groupby('S_INFO_WINDCODE')['S_FA_EPS_BASIC'].ffill()
+        self.growth_df['S_FA_EPS_BASIC'] = self.growth_df.groupby('REPORT_PERIOD')['S_FA_EPS_BASIC'].transform(
+            lambda x: x.fillna(x.mean()))
+        self.growth_df['ANN_DT'] = pd.to_datetime(self.growth_df['ANN_DT'], errors='coerce')
+        self.growth_df['ANN_DT'] = self.growth_df.groupby('REPORT_PERIOD')['ANN_DT'].transform(
+            lambda x: x.fillna(x.median()))
+
+    def GROWTH(self, raw: bool = False):
+        """
+        计算增长因子 GROWTH = 0.47 * SGRO + 0.24 * EGRO。
+        其中：
+        - SGRO = 销售增长率，基于 S_FA_GRPS 数据
+        - EGRO = 每股收益增长率，基于 S_FA_EPS_BASIC 数据
+
+        :return: 包含计算出的 GROWTH 因子的 DataFrame
+        """
+
+        self.growth_df['SGRO'] = np.nan
+        self.growth_df['EGRO'] = np.nan
+        grouped = self.growth_df.groupby('S_INFO_WINDCODE')
+        for stock_code, group in grouped:
+            if len(group) < 5:
+                continue
+
+            self.growth_df.loc[group.index, 'SGRO'] = group['S_FA_GRPS'].rolling(window=5).apply(
+                lambda x: Calculation._regress_w_time(x, 5), raw=False)
+
+            self.growth_df.loc[group.index, 'EGRO'] = group['S_FA_EPS_BASIC'].rolling(window=5).apply(
+                lambda x: Calculation._regress_w_time(x, 5), raw=False)
+
+        self.df = self.df.sort_values(by = 'TRADE_DT')
+        self.growth_df = self.growth_df.sort_values(by = 'ANN_DT')
+
+        self.df = pd.merge_asof(
+            self.df,
+            self.growth_df,
+            by='S_INFO_WINDCODE',
+            left_on='TRADE_DT',
+            right_on='ANN_DT',
+            direction='backward'
+        )
+
+        # 去除空值（年报数据不足五年的标的）
+        self.df.dropna(how = 'any', inplace = True)
+
+        self.df = self._preprocess(data=self.df, factor_column='SGRO')
+        self.df = self._preprocess(data=self.df, factor_column='EGRO')
+
+        self.df['GROWTH'] = 0.47 * self.df['SGRO'] + 0.24 * self.df['EGRO']
+
+        if not raw:
+            self.df = self._preprocess(data=self.df, factor_column='GROWTH')
+        self.df['GROWTH'] = self.df.groupby('S_INFO_WINDCODE')['GROWTH'].ffill()
+
+        return self.df
 
 # def risk_free():
 #     """
