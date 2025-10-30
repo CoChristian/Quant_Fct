@@ -11,7 +11,7 @@ START_DATE = '20150101'
 END_DATE = '20251014'
 File_Path_Juqing = "F:\\work\\Data\\Database_to_csv\\"
 File_Path_HomeCp = ("F:\\ECO\\Database_fromJQ\\Database_to_csv\\")
-File_Path = File_Path_HomeCp
+File_Path = File_Path_Juqing
 FactorBarra_Path = "F:\\work\\Projectpycharm\\MA_factor\\factor_data\\BARRA\\" # 目前若需要更新因子值，暂时需要新建文件夹，然后更改此处目录，后续尝试能够动态更新
 
 def getdatetimecol(df):
@@ -61,8 +61,15 @@ class GetData():
         return getdatetimecol(pd.read_csv(File_Path + "valuation_total\\valuation251014.csv"))
 
     @staticmethod
-    def _get_income():
-        return getdatetimecol(pd.read_csv(File_Path + "income_total\\income251028.csv"))
+    def _get_income(year):
+        # year_str = str(year)[-2:]
+        year_list = [str(year_get)[-2:] for year_get in range(year, 2026)]
+        income_list = []
+        for each in year_list:
+            file_name = "income" + each + ".csv"
+            income_list.append(getdatetimecol(pd.read_csv(File_Path + "income_total\\" + file_name)))
+        return pd.concat(income_list)
+        # return getdatetimecol(pd.read_csv(File_Path + "income_total\\income251028.csv"))
 
     @staticmethod
     def _get_cashflow():
@@ -626,21 +633,52 @@ class growth(GetData, Calculation):
         :param df: 股票数据的 DataFrame
         """
         self.df = df
-        self.growth_df = GetData.financialid_all()
+        # self.growth_df = GetData.financialid_all()
+        self.growth_df = GetData._get_income(2009)
         # 只保留财务日期和公告日期相差小于一年的记录
-        self.growth_df['ANN_DT'] = pd.to_datetime(self.growth_df['ANN_DT'])
-        self.growth_df['REPORT_PERIOD'] = pd.to_datetime(self.growth_df['REPORT_PERIOD'])
-        self.growth_df = self.growth_df[(self.growth_df['ANN_DT'] - self.growth_df['REPORT_PERIOD']) < pd.Timedelta(days=365)]
+        self.growth_df['statDate'] = pd.to_datetime(self.growth_df['statDate'])
+        self.growth_df['statDate_quarter'] = self.growth_df['statDate'].dt.quarter
+        self.growth_df['statDate_year'] = self.growth_df['statDate'].dt.year
+        self.growth_df['pubDate'] = pd.to_datetime(self.growth_df['pubDate'])
+        # self.growth_df = self.growth_df[(self.growth_df['pubDate'] - self.growth_df['statDate']) < pd.Timedelta(days=365)]
+
+        # merge 股本数据
+        self.capital = GetData._get_valuation()
+        self.growth_df = pd.merge(self.growth_df, self.capital[['trade_date','stock_code','capitalization']], on=['trade_date','stock_code'], how='left')
+        self.growth_df['GRPS'] = (self.growth_df['total_operating_revenue'] / self.growth_df['capitalization']) / 10000
+        self.growth_df['EPS_BASIC'] = (self.growth_df['net_profit'] / self.growth_df['capitalization']) / 10000
+        growth_Ann = self.growth_df.groupby(['stock_code','statDate_year','statDate_quarter']).agg({'trade_date':'first','GRPS':'first','EPS_BASIC':'first','pubDate':'first','statDate':'first'})
+        growth_Ann = growth_Ann.reset_index()
+        growth_Ann.columns = ['stock_code','statDate_year','statDate_quarter','trade_date','GRPS','EPS_BASIC','pubDate','statDate']
+        growth_Ann = growth_Ann[(growth_Ann['pubDate'] - growth_Ann['statDate']) < pd.Timedelta(days=365)]
+        growth_Ann = (
+            growth_Ann.set_index(['stock_code', 'statDate_year', 'statDate_quarter'])
+            .unstack('statDate_quarter')  # 将季度展开为列
+            .stack('statDate_quarter', dropna=False)  # 重新堆叠，保留空值
+            .reset_index()
+        )
+        growth_Ann['GRPS'] = growth_Ann.groupby('stock_code')['GRPS'].ffill()
+        growth_Ann['GRPS'] = growth_Ann.groupby(['statDate_year','statDate_quarter'])['GRPS'].transform(
+            lambda x: x.fillna(x.mean()))
+        growth_Ann['EPS_BASIC'] = growth_Ann.groupby('stock_code')['EPS_BASIC'].ffill()
+        growth_Ann['EPS_BASIC'] = growth_Ann.groupby(['statDate_year','statDate_quarter'])['EPS_BASIC'].transform(
+            lambda x: x.fillna(x.mean()))
+        growth_Ann['pubDate'] = pd.to_datetime(growth_Ann['pubDate'], errors='coerce')
         # 处理空值，先向后填充再截面均值填充
-        self.growth_df['S_FA_GRPS'] = self.growth_df.groupby('S_INFO_WINDCODE')['S_FA_GRPS'].ffill()
-        self.growth_df['S_FA_GRPS'] = self.growth_df.groupby('REPORT_PERIOD')['S_FA_GRPS'].transform(
-            lambda x: x.fillna(x.mean()))
-        self.growth_df['S_FA_EPS_BASIC'] = self.growth_df.groupby('S_INFO_WINDCODE')['S_FA_EPS_BASIC'].ffill()
-        self.growth_df['S_FA_EPS_BASIC'] = self.growth_df.groupby('REPORT_PERIOD')['S_FA_EPS_BASIC'].transform(
-            lambda x: x.fillna(x.mean()))
-        self.growth_df['ANN_DT'] = pd.to_datetime(self.growth_df['ANN_DT'], errors='coerce')
-        self.growth_df['ANN_DT'] = self.growth_df.groupby('REPORT_PERIOD')['ANN_DT'].transform(
+        # growth_Ann['GRPS'] = growth_Ann.groupby('stock_code')['GRPS'].ffill()
+        growth_Ann['ANN_DT'] = growth_Ann.groupby(['statDate_year','statDate_quarter'])['pubDate'].transform(
             lambda x: x.fillna(x.median()))
+        self.growth_df = growth_Ann
+
+
+        # self.growth_df['GRPS'] = self.growth_df.groupby('REPORT_PERIOD')['S_FA_GRPS'].transform(
+        #     lambda x: x.fillna(x.mean()))
+        # self.growth_df['EPS_BASIC'] = self.growth_df.groupby('stock_code')['EPS_BASIC'].ffill()
+        # self.growth_df['S_FA_EPS_BASIC'] = self.growth_df.groupby('REPORT_PERIOD')['S_FA_EPS_BASIC'].transform(
+        #     lambda x: x.fillna(x.mean()))
+        # self.growth_df['ANN_DT'] = pd.to_datetime(self.growth_df['ANN_DT'], errors='coerce')
+        # self.growth_df['ANN_DT'] = self.growth_df.groupby('REPORT_PERIOD')['ANN_DT'].transform(
+        #     lambda x: x.fillna(x.median()))
 
     def GROWTH(self, raw: bool = False):
         """
@@ -651,31 +689,33 @@ class growth(GetData, Calculation):
 
         :return: 包含计算出的 GROWTH 因子的 DataFrame
         """
+        group_growth = self.growth_df.groupby(['stock_code','year']).agg({'GPRS':'last'})
 
         self.growth_df['SGRO'] = np.nan
         self.growth_df['EGRO'] = np.nan
-        grouped = self.growth_df.groupby('S_INFO_WINDCODE')
+        grouped = self.growth_df.groupby('stock_code')
         for stock_code, group in grouped:
-            if len(group) < 5:
+            if len(group) < 5 * 4:
                 continue
 
-            self.growth_df.loc[group.index, 'SGRO'] = group['S_FA_GRPS'].rolling(window=5).apply(
-                lambda x: Calculation._regress_w_time(x, 5), raw=False)
+            self.growth_df.loc[group.index, 'SGRO'] = group['GRPS'].rolling(window=5*4).apply(
+                lambda x: Calculation._regress_w_time(x, 5*4), raw=False)
 
-            self.growth_df.loc[group.index, 'EGRO'] = group['S_FA_EPS_BASIC'].rolling(window=5).apply(
-                lambda x: Calculation._regress_w_time(x, 5), raw=False)
+            self.growth_df.loc[group.index, 'EGRO'] = group['EPS_BASIC'].rolling(window=5*4).apply(
+                lambda x: Calculation._regress_w_time(x, 5*4), raw=False)
 
-        self.df = self.df.sort_values(by = 'TRADE_DT')
-        self.growth_df = self.growth_df.sort_values(by = 'ANN_DT')
+        self.df = self.df.sort_values(by = 'trade_date')
+        self.growth_df = self.growth_df.sort_values(by = 'pubDate')
 
         self.df = pd.merge_asof(
             self.df,
             self.growth_df,
-            by='S_INFO_WINDCODE',
-            left_on='TRADE_DT',
-            right_on='ANN_DT',
+            by='stock_code',
+            left_on='trade_date',
+            right_on='pubDate',
             direction='backward'
         )
+
 
         # 去除空值（年报数据不足五年的标的）
         self.df.dropna(how = 'any', inplace = True)
@@ -687,7 +727,7 @@ class growth(GetData, Calculation):
 
         if not raw:
             self.df = self._preprocess(data=self.df, factor_column='GROWTH')
-        self.df['GROWTH'] = self.df.groupby('S_INFO_WINDCODE')['GROWTH'].ffill()
+        self.df['GROWTH'] = self.df.groupby('stock_code')['GROWTH'].ffill()
 
         return self.df
 
@@ -727,10 +767,13 @@ class growth(GetData, Calculation):
 
 if __name__ == '__main__':
     total_data = GetData._get_price_()
-    total_data = total_data[total_data['year']>=2016]
-    valuation_data = GetData._get_valuation()
-    size_calculator = Size()
+    # total_data = total_data[total_data['year']>=2016]
+    # valuation_data = GetData._get_valuation()
+    # size_calculator = Size()
+    #
+    # Beta_data = Beta(total_data)
+    # beta_df = Beta_data.beta_df
 
-    Beta_data = Beta(total_data)
-    beta_df = Beta_data.beta_df
+    growth_data = growth(total_data)
+
     print("test")

@@ -47,27 +47,42 @@ except Exception as e:
 # 示例2：从 quantdb_time_sliced 数据库读取数据
 # read all data
 # price_history_data
+# prefix = 'income'
+# df_vertical = pd.DataFrame()
+#
+# # 构建一次性查询所有表的SQL
+# table_names = [f"{prefix}{i:02d}" for i in range(5, 26)]
+# union_queries = []
+#
+# for table_name in table_names:
+#     union_queries.append(f"SELECT *, '{table_name}' as source_table FROM {table_name}")
+#
+# # 一次性查询所有数据
+# combined_query = " UNION ALL ".join(union_queries)
+#
+# try:
+#     df_vertical = pd.read_sql(combined_query, con=engine_time_sliced)
+#     print(f"成功读取所有表数据，总行数: {len(df_vertical)}")
+# except Exception as e:
+#     print(f"批量读取数据时出错: {e}")
+
 prefix = 'income'
-df_vertical = pd.DataFrame()
 
-# 构建一次性查询所有表的SQL
-table_names = [f"{prefix}{i:02d}" for i in range(5, 26)]
-union_queries = []
+# 循环处理每个表
+for i in range(5, 26):
+    table_name = f"{prefix}{i:02d}"
 
-for table_name in table_names:
-    union_queries.append(f"SELECT *, '{table_name}' as source_table FROM {table_name}")
+    try:
+        # 读取单个表的数据
+        df_single = pd.read_sql(f"SELECT * FROM {table_name}", con=engine_time_sliced)
 
-# 一次性查询所有数据
-combined_query = " UNION ALL ".join(union_queries)
+        # 保存为CSV文件
+        csv_filename = f"F:\\work\\Data\\Database_to_csv\\income_total\\{table_name}.csv"
+        df_single.to_csv(csv_filename, index=False, encoding='utf-8')
+        print(f"成功保存表 {table_name} 到 {csv_filename}，行数: {len(df_single)}")
 
-try:
-    df_vertical = pd.read_sql(combined_query, con=engine_time_sliced)
-    print(f"成功读取所有表数据，总行数: {len(df_vertical)}")
-except Exception as e:
-    print(f"批量读取数据时出错: {e}")
-
-
-
+    except Exception as e:
+        print(f"读取表 {table_name} 时出错: {e}")
 
 
 # for i in tqdm(range(5,26)):
@@ -88,4 +103,4 @@ except Exception as e:
 #         print(f"读取时间切片数据时出错: {e}")
 
 #
-print(df_vertical)
+# df_vertical.to_csv("F:\\work\\Data\\Database_to_csv\\income_total\\income251029.csv", index=False, encoding='utf-8-sig')
