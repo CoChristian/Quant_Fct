@@ -66,8 +66,8 @@ except Exception as e:
 # except Exception as e:
 #     print(f"批量读取数据时出错: {e}")
 
-prefix = 'income'
-
+prefix = 'balance'
+file_name = prefix + '_total'
 # 循环处理每个表
 for i in range(5, 26):
     table_name = f"{prefix}{i:02d}"
@@ -77,7 +77,7 @@ for i in range(5, 26):
         df_single = pd.read_sql(f"SELECT * FROM {table_name}", con=engine_time_sliced)
 
         # 保存为CSV文件
-        csv_filename = f"F:\\work\\Data\\Database_to_csv\\income_total\\{table_name}.csv"
+        csv_filename = f"F:\\work\\Data\\Database_to_csv\\{file_name}\\{table_name}.csv"
         df_single.to_csv(csv_filename, index=False, encoding='utf-8')
         print(f"成功保存表 {table_name} 到 {csv_filename}，行数: {len(df_single)}")
 
