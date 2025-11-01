@@ -71,15 +71,25 @@ class GetData():
         return pd.concat(income_list)
         # return getdatetimecol(pd.read_csv(File_Path + "income_total\\income251028.csv"))
 
-        @staticmethod
-        def _get_balance(year):
-            # year_str = str(year)[-2:]
-            year_list = [str(year_get)[-2:] for year_get in range(year, 2026)]
-            balance_list = []
-            for each in year_list:
-                file_name = "balance" + each + ".csv"
-                balance_list.append(getdatetimecol(pd.read_csv(File_Path + "balance_total\\" + file_name)))
-            return pd.concat(balance_list)
+    @staticmethod
+    def _get_balance(year):
+        # year_str = str(year)[-2:]
+        year_list = [str(year_get)[-2:] for year_get in range(year, 2026)]
+        balance_list = []
+        for each in year_list:
+            file_name = "balance" + each + ".csv"
+            balance_list.append(getdatetimecol(pd.read_csv(File_Path + "balance_total\\" + file_name)))
+        return pd.concat(balance_list)
+
+    @staticmethod
+    def _get_cashflow(year):
+        # year_str = str(year)[-2:]
+        year_list = [str(year_get)[-2:] for year_get in range(year, 2026)]
+        cashflow_list = []
+        for each in year_list:
+            file_name = "cash_flow" + each + ".csv"
+            cashflow_list.append(getdatetimecol(pd.read_csv(File_Path + "cash_flow_total\\" + file_name)))
+        return pd.concat(balance_list)
 
 
     @staticmethod
@@ -975,48 +985,55 @@ class EarningsYield(GetData, Calculation):
         """
 
         epibs_df = GetData._get_valuation()[['trade_date','stock_code','pe_ratio']]
+        cash_df = GetData._get_cashflow(2009)['trade_date','stock_code','net_operate_cash_flow']
+        marketv_df = GetData._get_valuation()['trade_date','stock_code','market_cap']
         # epibs_df = epibs_df[~epibs_df['S_INFO_WINDCODE'].str.endswith('BJ')]
         epibs_df['EPIBS'] = 1 / epibs_df['pe_ratio']
 
-        grouped = epibs_df.groupby('stock_code')
-        for stock_code, group in grouped:
-            if group['EPIBS'].isna().all():
-                epibs_df = epibs_df.drop(group.index)
-
-                epibs_fy0_df = GetData.est_consensus_rolling_FY0(stock_code)
-                epibs_fy0_df['EPIBS'] = 1 / epibs_fy0_df['EST_PE']
-
-                epibs_df = pd.concat([epibs_df, epibs_fy0_df], ignore_index=True)
-
-        epibs_df.sort_values(by='EST_DT', inplace=True)
+        # grouped = epibs_df.groupby('stock_code')
+        # for stock_code, group in grouped:
+        #     if group['EPIBS'].isna().all():
+        #         epibs_df = epibs_df.drop(group.index)
+        #
+        #         epibs_fy0_df = GetData.est_consensus_rolling_FY0(stock_code)
+        #         epibs_fy0_df['EPIBS'] = 1 / epibs_fy0_df['EST_PE']
+        #
+        #         epibs_df = pd.concat([epibs_df, epibs_fy0_df], ignore_index=True)
+        #
+        # epibs_df.sort_values(by='EST_DT', inplace=True)
         epibs_df['EPIBS'] = epibs_df.groupby('stock_code')['EPIBS'].fillna(method='ffill')
-        epibs_df['EST_DT'] = pd.to_datetime(epibs_df['EST_DT'])
-        df = pd.merge(
-            df,
-            epibs_df,
-            left_on = ['S_INFO_WINDCODE', 'TRADE_DT'],
-            right_on = ['S_INFO_WINDCODE', 'EST_DT']
-        )
+        cash_df['net_operate_cash_flow'] = cash_df.groupby('stock_code')['net_operate_cash_flow'].fillna(method='ffill')
+        df = pd.merge(marketv_df, cash_df, on=['trade_date','stock_code'], how='left')
+        df = pd.merge(df, epibs_df, on=['trade_date','stock_code'], how='left')
+        # epibs_df['EST_DT'] = pd.to_datetime(epibs_df['EST_DT'])
+        # df = pd.merge(
+        #     df,
+        #     epibs_df,
+        #     left_on = ['S_INFO_WINDCODE', 'TRADE_DT'],
+        #     right_on = ['S_INFO_WINDCODE', 'EST_DT']
+        # )
 
-        earnings_df = GetData.ttmhis_all()
-        earnings_df.sort_values(by='ANN_DT', inplace=True)
-        earnings_df['ANN_DT'] = pd.to_datetime(earnings_df['ANN_DT'])
-        earnings_df['REPORT_PERIOD'] = pd.to_datetime(earnings_df['REPORT_PERIOD'])
-        earnings_df = earnings_df[(earnings_df['ANN_DT'] - earnings_df['REPORT_PERIOD']) < pd.Timedelta(days=365)]
-        earnings_df.reset_index(drop=True, inplace=True)
+        earnings_df = GetData._get_income(2009)[['trade_date','stock_code','net_profit']]
+        earnings_df.sort_values(by='trade_date', inplace=True)
+        earnings_df['net_profit'] = earnings_df.groupby('stock_code')['net_profit'].fillna(method='ffill')
+        df = pd.merge(df, earnings_df, on=['trade_date','stock_code'], how='left')
+        # earnings_df['ANN_DT'] = pd.to_datetime(earnings_df['ANN_DT'])
+        # earnings_df['REPORT_PERIOD'] = pd.to_datetime(earnings_df['REPORT_PERIOD'])
+        # earnings_df = earnings_df[(earnings_df['ANN_DT'] - earnings_df['REPORT_PERIOD']) < pd.Timedelta(days=365)]
+        # earnings_df.reset_index(drop=True, inplace=True)
+        #
+        # df = df.sort_values(by='TRADE_DT')
+        # df = pd.merge_asof(
+        #     df,
+        #     earnings_df,
+        #     by='S_INFO_WINDCODE',
+        #     left_on='TRADE_DT',
+        #     right_on='ANN_DT',
+        #     direction='backward'
+        # )
 
-        df = df.sort_values(by='TRADE_DT')
-        df = pd.merge_asof(
-            df,
-            earnings_df,
-            by='S_INFO_WINDCODE',
-            left_on='TRADE_DT',
-            right_on='ANN_DT',
-            direction='backward'
-        )
-
-        df['EARNINGS_TTM'] = df.groupby('S_INFO_WINDCODE')['EARNINGS_TTM'].fillna(method='ffill')
-        df['CASH_EARNINGS_TTM'] = df.groupby('S_INFO_WINDCODE')['CASH_EARNINGS_TTM'].fillna(method='ffill')
+        # df['EARNINGS_TTM'] = df.groupby('')['EARNINGS_TTM'].fillna(method='ffill')
+        # df['CASH_EARNINGS_TTM'] = df.groupby('S_INFO_WINDCODE')['CASH_EARNINGS_TTM'].fillna(method='ffill')
 
         return df
 
@@ -1028,14 +1045,13 @@ class EarningsYield(GetData, Calculation):
         :return: 返回包含新增列 'EARNYILD' 的 DataFrame。
         """
         df = self.prepared_df
-        df['ETOP'] = df['EARNINGS_TTM'] / df['S_VAL_MV']
-        df['CETOP'] = df['CASH_EARNINGS_TTM'] / df['S_VAL_MV']
+        df['ETOP'] = (df['net_profit'] / df['market_cap']) / 100000000
+        df['CETOP'] = (df['net_operate_cash_flow'] / df['market_cap']) / 100000000
 
         for columns in ['EPIBS', 'ETOP', 'CETOP']:
              df[columns] = df[columns].astype('float64')
 
-        df['EARNYILD'] = 0.68 * df['EPIBS'] + 0.11 * df['ETOP'] + 0.21 * df[
-            'CETOP']
+        df['EARNYILD'] = 0.68 * df['EPIBS'] + 0.11 * df['ETOP'] + 0.21 * df['CETOP']
 
         if not raw:
             df = self._preprocess(df, factor_column='EARNYILD')
