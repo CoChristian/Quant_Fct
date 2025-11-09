@@ -287,3 +287,15 @@ def plot_multi_line(x_lst, y_lst, label_lst, xlabel, ylabel, fig_title):
     # plt.close()
     plt.show()
     return fig
+
+
+# get trade date
+def get_trade_date(df, start_year, period=None):
+    df = df[df['year'] >= start_year]
+    period_date = None
+    if period in ['week', 'month']:
+        period_date = df.groupby(['year','week'])['trade_date'].last()
+    elif type(period) == int:
+        period_date = df[::period]['trade_date']
+
+    return pd.DataFrame(period_date)
