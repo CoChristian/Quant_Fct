@@ -47,15 +47,32 @@ except Exception as e:
 # 示例2：从 quantdb_time_sliced 数据库读取数据
 # read all data
 # price_history_data
-# prefix = 'income'
-# df_vertical = pd.DataFrame()
-#
-# # 构建一次性查询所有表的SQL
-# table_names = [f"{prefix}{i:02d}" for i in range(5, 26)]
+prefix = 'index_stock_relation'
+df_vertical = pd.DataFrame()
+
+# 构建一次性查询所有表的SQL
+table_names = []
+years = range(2005, 2026)  # 假设年份从2020到2023
+months = range(1, 13)      # 1-12月
+
+index_symbol = '000905.XSHG'
+df_index = pd.DataFrame()
+for year in years:
+    for month in months:
+        if (year == 2025) and (month > 10):
+            break
+        str_year = str(year)[-2:]
+        table_name = f"{prefix}{str_year}{month:02d}"
+        try:
+            df_single =  pd.read_sql(f"SELECT * FROM {table_name} WHERE exponentcode = '{index_symbol}'", con=engine_time_sliced)
+            df_index = pd.concat([df_index, df_single])
+        except Exception as e:
+            print(f"批量读取数据时出错: {e}")
+
+
 # union_queries = []
-#
-# for table_name in table_names:
-#     union_queries.append(f"SELECT *, '{table_name}' as source_table FROM {table_name}")
+# for table_name in tqdm(table_names):
+#     union_queries.append(f"SELECT *, '{table_name}' as source_table FROM {table_name} WHERE exponentcode = '{index_symbol}'")
 #
 # # 一次性查询所有数据
 # combined_query = " UNION ALL ".join(union_queries)
@@ -66,23 +83,8 @@ except Exception as e:
 # except Exception as e:
 #     print(f"批量读取数据时出错: {e}")
 
-prefix = 'cash_flow'
-file_name = prefix + '_total'
-# 循环处理每个表
-for i in range(5, 26):
-    table_name = f"{prefix}{i:02d}"
 
-    try:
-        # 读取单个表的数据
-        df_single = pd.read_sql(f"SELECT * FROM {table_name}", con=engine_time_sliced)
-
-        # 保存为CSV文件
-        csv_filename = f"F:\\work\\Data\\Database_to_csv\\{file_name}\\{table_name}.csv"
-        df_single.to_csv(csv_filename, index=False, encoding='utf-8')
-        print(f"成功保存表 {table_name} 到 {csv_filename}，行数: {len(df_single)}")
-
-    except Exception as e:
-        print(f"读取表 {table_name} 时出错: {e}")
+print("test")
 
 
 # for i in tqdm(range(5,26)):
@@ -103,4 +105,4 @@ for i in range(5, 26):
 #         print(f"读取时间切片数据时出错: {e}")
 
 #
-# df_vertical.to_csv("F:\\work\\Data\\Database_to_csv\\income_total\\income251029.csv", index=False, encoding='utf-8-sig')
+print(df_vertical)
