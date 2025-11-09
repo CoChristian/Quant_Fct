@@ -66,7 +66,7 @@ except Exception as e:
 # except Exception as e:
 #     print(f"批量读取数据时出错: {e}")
 
-prefix = 'balance'
+prefix = 'cash_flow'
 file_name = prefix + '_total'
 # 循环处理每个表
 for i in range(5, 26):

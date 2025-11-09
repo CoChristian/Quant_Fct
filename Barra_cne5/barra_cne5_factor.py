@@ -5,6 +5,7 @@ from datetime import datetime, timedelta
 import akshare as ak
 import numpy as np
 import statsmodels.api as sm
+from tqdm import tqdm
 from scipy.stats import zscore
 
 START_DATE = '20150101'
@@ -89,12 +90,13 @@ class GetData():
         for each in year_list:
             file_name = "cash_flow" + each + ".csv"
             cashflow_list.append(getdatetimecol(pd.read_csv(File_Path + "cash_flow_total\\" + file_name)))
-        return pd.concat(balance_list)
+        return pd.concat(cashflow_list)
 
 
-    @staticmethod
-    def _get_cashflow():
-        return getdatetimecol(pd.read_csv(File_Path + "cashflow_total\\cashflow251028.csv"))
+
+    # @staticmethod
+    # def _get_cashflow():
+    #     return getdatetimecol(pd.read_csv(File_Path + "cashflow_total\\cashflow251028.csv"))
 
     @staticmethod
     def risk_free():
@@ -102,8 +104,8 @@ class GetData():
         获取无风险利率（十年国债收益率）
         :return: 无风险利率数据框 格式：日期，年化收益
         """
-        current_df_start_time = datetime.strptime('2005-01-01', "%Y%m%d")
-        end_date_time = datetime.strptime('2025-12-31', "%Y%m%d")
+        current_df_start_time = datetime.strptime('20080101', "%Y%m%d")
+        end_date_time = datetime.strptime('20251231', "%Y%m%d")
         yield10yr_df = pd.DataFrame()
         if os.path.exists(File_Path + "rf\\risk_free.csv"):
             yield10yr_df = pd.read_csv(File_Path + "rf\\risk_free.csv")
@@ -202,9 +204,9 @@ class Calculation:
         if data[f'{factor_column}'].dtype != np.float64:
             data[f'{factor_column}'] = data[f'{factor_column}'].astype('float')
         data[f'{factor_column}_wsr'] = data.groupby('trade_date')[f'{factor_column}'].transform(lambda x: self._winsorize(x))
-        data[f'{factor_column}_pp'] = data.groupby('trade_date').apply(lambda g: self._standardize(g[f'{factor_column}_wsr'], g['S_VAL_MV'])).reset_index(level=0, drop=True)
-        data[f'{factor_column}'] = data[f'{factor_column}_pp']
-        data.drop(columns=[f'{factor_column}_wsr', f'{factor_column}_pp'], inplace=True)
+        data[f'{factor_column}_pp'] = data.groupby('trade_date').apply(lambda g: self._standardize(g[f'{factor_column}_wsr'], g['market_cap'])).reset_index(level=0, drop=True)
+        # data[f'{factor_column}'] = data[f'{factor_column}_pp']
+        # data.drop(columns=[f'{factor_column}_wsr', f'{factor_column}_pp'], inplace=True)
         return data
 
     @staticmethod
@@ -273,7 +275,7 @@ class Beta(Calculation):
         self.csi_df = GetData._get_index()
         self.csi_df = self.csi_df[self.csi_df['stock_code']=='000985.XSHG']
         # self.csi_df['trade_date'] = pd.to_datetime(self.csi_df['date'])
-        self.csi_df['MKT_RETURN'] = self.csi_df['close'] / self.csi_df['pre_close'].shift() - 1
+        self.csi_df['MKT_RETURN'] = self.csi_df['close'] / self.csi_df['pre_close'] - 1
         self.csi_df['MKT_RETURN'] = self.csi_df['MKT_RETURN'].astype(float)
         self.beta_df = self.BETA(df)
 
@@ -289,7 +291,7 @@ class Beta(Calculation):
         :return: 包含新增列 'ALPHA', 'BETA', 'SIGMA' 的 DataFrame
         """
         if os.path.exists(FactorBarra_Path + "beta.csv"):
-           df = pd.read_csv(FactorBarra_Path + "beta.csv")
+            df = pd.read_csv(FactorBarra_Path + "beta.csv")
         else:
             df['STOCK_RETURN'] = df['close'] / df['pre_close'] - 1
             df['STOCK_RETURN'] = df['STOCK_RETURN'].astype('float')
@@ -300,6 +302,8 @@ class Beta(Calculation):
             if 'RF_RETURN' not in df.columns:
                 df = df.merge(self.rf_df, on='trade_date', how='left')
 
+            df = df.dropna(subset=['MKT_RETURN'])
+
             exp_weight = self._exp_weight(window=252, half_life=63)
             df['ALPHA'] = np.nan
             df['BETA'] = np.nan
@@ -307,8 +311,11 @@ class Beta(Calculation):
 
             # def cal_WLS_beta_alpha(df):
             #     df
-
-            for stock_code, group in grouped:
+            # def cal_w_regre(df):
+            #     df.rolling()
+            for stock_code, group in tqdm(grouped):
+                group = group[group['paused']!=1].copy()
+                group['ori_idx'] = group.index
                 if group[group['trade_date'] > pd.to_datetime('2010-01-01').date()].empty:
                     continue
 
@@ -319,19 +326,22 @@ class Beta(Calculation):
                     group['CONSTANT'] = 1
                     alphas = []
                     betas = []
+                    results = []
 
                     for i in range(251, len(group)):
                         window_data = group.iloc[i - 251:i + 1]
                         alpha, beta = self._weighted_regress(window_data, exp_weight)
-                        alphas.append(alpha)
-                        betas.append(beta)
+                        # alphas.append(alpha)
+                        # betas.append(beta)
+                        results.append((group.iloc[i]['ori_idx'],alpha,beta))
+                    for orig_idx, alpha, beta in results:
+                        df.loc[orig_idx, 'ALPHA'] = alpha
+                        df.loc[orig_idx, 'BETA'] = beta
 
-                    # Store the results, shifting by one period
-                    original_df_index = grouped.indices[f'{stock_code}']
-                    df.loc[original_df_index[251:], 'ALPHA'] = np.array(alphas)
-                    df.loc[original_df_index[251:], 'BETA'] = np.array(betas)
-                    df.loc[original_df_index, 'ALPHA'] = df.loc[original_df_index, 'ALPHA'].shift(1)
-                    df.loc[original_df_index, 'BETA'] = df.loc[original_df_index, 'BETA'].shift(1)
+                    stock_mask = df['stock_code'] == stock_code
+                    df.loc[stock_mask, 'ALPHA'] = df.loc[stock_mask, 'ALPHA'].shift(1)
+                    df.loc[stock_mask, 'BETA'] = df.loc[stock_mask, 'BETA'].shift(1)
+
 
             df['SIGMA'] = df['STOCK_RETURN']- df['RF_RETURN'] - (df['ALPHA'] + df['BETA'] * df['MKT_RETURN'])
             df = df[['trade_date','stock_code','ALPHA','BETA','SIGMA']]
@@ -376,7 +386,7 @@ class Momentum(Calculation):
             # 按个股代码分组
             grouped = df.groupby('stock_code')
 
-            for stock_code, group in grouped:
+            for stock_code, group in tqdm(grouped):
                 # 检查数据长度是否足够计算动量因子
                 if len(group) < 504 + 21:
                     print(f'Not enough data to calculate Momentum for {stock_code}')
@@ -399,10 +409,14 @@ class Momentum(Calculation):
                         df.loc[group.index, 'RSTR'] = np.nan
 
             df = df[['trade_date','stock_code','RSTR']]  # preprocess 的处理需要列中有MV和行业 需要考虑如何处理
-            df.to_csv(FactorBarra_Path + "RSTR.csv", index=False, encoding='utf-8-sig')
+
         # 如果 raw 为 False，则进行预处理
         if not raw:
+            mkt_df = GetData._get_valuation()[['trade_date','stock_code','market_cap']]
+            df = pd.merge(df, mkt_df, on=['trade_date','stock_code'], how='left')
             df = self._preprocess(df, factor_column='RSTR')
+            df = df[['trade_date','stock_code','RSTR_wsr','RSTR_pp']]
+        df.to_csv(FactorBarra_Path + "RSTR.csv", index=False, encoding='utf-8-sig')
         return df
 
 
@@ -427,7 +441,7 @@ class Size(Calculation):
                 df['capitalization'] = df['capitalization'].astype(np.float64)
 
             df['LNCAP'] = np.log(df['capitalization'])
-            df = df[['trade_date','stock_code','LNCAP']]
+            df = df[['trade_date','stock_code','LNCAP','market_cap']]
             df.to_csv(FactorBarra_Path + "LNCAP.csv", index=False, encoding='utf-8-sig')
         if not raw:
             df = self._preprocess(df, factor_column = 'LNCAP')
@@ -456,7 +470,7 @@ class Size(Calculation):
 
             model = sm.OLS(y, X).fit()
             df['NLSIZE'] = model.resid
-            df = df[['trade_date','stock_code','NLSIZE']]
+            df = df[['trade_date','stock_code','NLSIZE','market_cap']]
             df.to_csv(FactorBarra_Path + "NLSIZE.csv", index=False, encoding='utf-8-sig')
 
         if not raw:
@@ -483,8 +497,15 @@ class ResidualVolatility(Calculation):
                 - 'RF_RETURN': 无风险收益 (在 CMRA 中需要)
     :return: 包含计算后波动率因子的 DataFrame
     """
-
-    def DASTD(self, df):
+    def __init__(self, df):
+        self.valuation_df = GetData._get_valuation()[['trade_date','stock_code','market_cap']]
+        self.df = pd.merge(df, self.valuation_df, on=['trade_date','stock_code'], how='left')
+        self.df['STOCK_RETURN'] = self.df['close'] / self.df['pre_close'] - 1
+        self.df['STOCK_RETURN'] = self.df['STOCK_RETURN'].astype('float')
+        sigma_df = pd.read_csv("F:\\work\\Projectpycharm\\MA_factor\\factor_data\\BARRA\\beta.csv")
+        sigma_df['trade_date'] = pd.to_datetime(sigma_df['trade_date']).dt.date
+        self.df = pd.merge(self.df, sigma_df, on=['trade_date','stock_code'], how='left')
+    def DASTD(self):
         """
         计算日波动率标准差 (DASTD)
 
@@ -494,13 +515,10 @@ class ResidualVolatility(Calculation):
         if os.path.exists(FactorBarra_Path + "DASTD.csv"):
             df = pd.read_csv(FactorBarra_Path + "DASTD.csv")
         else:
-
-            df['STOCK_RETURN'] = df['close'] / df['pre_close'] - 1
-            df['STOCK_RETURN'] = df['STOCK_RETURN'].astype('float')
             exp_weight = self._exp_weight(window=252, half_life=42)
-            df['DASTD'] = np.nan
+            self.df['DASTD'] = np.nan
 
-            grouped = df.groupby('stock_code')
+            grouped = self.df.groupby('stock_code')
 
             for stock_code, group in grouped:
                 if len(group) < 252:
@@ -512,17 +530,17 @@ class ResidualVolatility(Calculation):
                         group['DASTD'] = group['STOCK_RETURN'].rolling(window=252).apply(
                             lambda x: np.sum(np.std(x) * exp_weight))
 
-                        df.loc[group.index, 'DASTD'] = group['DASTD']
+                        self.df.loc[group.index, 'DASTD'] = group['DASTD']
 
                     except Exception as e:
                         print(f'Error processing {stock_code}: {e}')
-                        df.loc[group.index, 'DASTD'] = np.nan
-            df = df[['trade_date','stock_code','DASTD']]
+                        self.df.loc[group.index, 'DASTD'] = np.nan
+            df = self.df[['trade_date','stock_code','DASTD']]
             df.to_csv(FactorBarra_Path + "DASTD.csv", index=False, encoding='utf-8-sig')
 
         return df['DASTD']
 
-    def CMRA(self, df):
+    def CMRA(self):
         """
         计算累积范围测度 (CMRA)
 
@@ -532,14 +550,14 @@ class ResidualVolatility(Calculation):
         if os.path.exists(FactorBarra_Path + "CMRA.csv"):
             df = pd.read_csv(FactorBarra_Path + "CMRA.csv")
         else:
-            if 'RF_RETURN' not in df.columns:
+            if 'RF_RETURN' not in self.df.columns:
                 rf_df = GetData.risk_free()
-                df = df.merge(rf_df, on='trade_date', how='left')
+                self.df = self.df.merge(rf_df, on='trade_date', how='left')
 
-            df['CMRA'] = np.nan
-            grouped = df.groupby('stock_code')
+            self.df['CMRA'] = np.nan
+            grouped = self.df.groupby('stock_code')
 
-            for stock_code, group in grouped:
+            for stock_code, group in tqdm(grouped):
                 if len(group) < 252:
                     print(f'Not enough data to calculate CMRA for {stock_code}')
                     continue
@@ -549,12 +567,12 @@ class ResidualVolatility(Calculation):
                         group['ELR'] = np.log(1 + group['STOCK_RETURN']) - np.log(1 + group['RF_RETURN'])
                         group['CMRA'] = group['ELR'].rolling(window=252).apply(
                             lambda x: self._cumulative_range(x), raw=True)
-                        df.loc[group.index, 'CMRA'] = group['CMRA']
+                        self.df.loc[group.index, 'CMRA'] = group['CMRA']
 
                     except Exception as e:
                         print(f'Error processing {stock_code}: {e}')
-                        df.loc[group.index, 'CMRA'] = np.nan
-            df = df[['trade_date','stock_code','CMRA']]
+                        self.df.loc[group.index, 'CMRA'] = np.nan
+            df = self.df[['trade_date','stock_code','CMRA']]
             df.to_csv(FactorBarra_Path + "CMRA.csv", index=False, encoding='utf-8-sig')
         return df['CMRA']
 
@@ -570,7 +588,7 @@ class ResidualVolatility(Calculation):
         cumulative_ranges = [x[-(t * 21):].sum() for t in T]
         return np.max(cumulative_ranges) - np.min(cumulative_ranges)
 
-    def HSIGMA(self, df):
+    def HSIGMA(self):
         """
         计算指数平滑残差波动率 (HSIGMA)
 
@@ -580,63 +598,65 @@ class ResidualVolatility(Calculation):
         if os.path.exists(FactorBarra_Path + "HSIGMA.csv"):
             df = pd.read_csv(FactorBarra_Path + "HSIGMA.csv")
         else:
-            df['HSIGMA'] = np.nan
-            grouped = df.groupby('stock_code')
+            self.df['HSIGMA'] = np.nan
+            grouped = self.df.groupby('stock_code')
 
-            for stock_code, group in grouped:
+            for stock_code, group in tqdm(grouped):
                 if len(group) < 252:
                     print(f'Not enough data to calculate HSIGMA for {stock_code}')
                     continue
                 group['HSIGMA'] = group['SIGMA'].ewm(halflife=63, span=None, min_periods=252).std()
-                df.loc[group.index, 'HSIGMA'] = group['HSIGMA']
-            df = df[['trade_date','stock_code','HSIGMA']]
+                self.df.loc[group.index, 'HSIGMA'] = group['HSIGMA']
+            df = self.df[['trade_date','stock_code','HSIGMA']]
             df.to_csv(FactorBarra_Path + "HSIGMA.csv", index=False, encoding='utf-8-sig')
 
 
         return df['HSIGMA']
 
-    def RESVOL(self, df):
+    def RESVOL(self):
         """
         计算综合残差波动率因子 (RESVOL)
 
         :param df: 包含 DASTD, CMRA, HSIGMA 和 BETA 的 DataFrame
         :return: 计算后的 RESVOL 列
         """
-        if os.path.exists(FactorBarra_Path + "HSIGMA.csv"):
-            df = pd.read_csv(FactorBarra_Path + "HSIGMA.csv")
+        if os.path.exists(FactorBarra_Path + "RESVOL.csv"):
+            self.df = pd.read_csv(FactorBarra_Path + "RESVOL.csv")
         else:
-            df['DASTD'] = self.DASTD(df)
-            df = self._preprocess(df, factor_column='DASTD')
-            df['CMRA'] = self.CMRA(df)
-            df = self._preprocess(df, factor_column='CMRA')
-            df['HSIGMA'] = self.HSIGMA(df)
-            df = self._preprocess(df, factor_column='HSIGMA')
+            # pd.merge()
+            self.df['DASTD'] = self.DASTD()
+            self.df = self._preprocess(self.df, factor_column='DASTD')
+            self.df['CMRA'] = self.CMRA()
+            self.df = self._preprocess(self.df, factor_column='CMRA')
+            self.df['HSIGMA'] = self.HSIGMA()
+            self.df = self._preprocess(self.df, factor_column='HSIGMA')
 
-            df['RESVOL'] = 0.74 * df['DASTD'] + 0.16 * df['CMRA'] + 0.1 * df['HSIGMA']
+            self.df['RESVOL'] = 0.74 * self.df['DASTD_pp'] + 0.16 * self.df['CMRA_pp'] + 0.1 * self.df['HSIGMA_pp']
 
-            if 'BETA' not in df.columns:
+            if 'BETA' not in self.df.columns:
                 beta_df = pd.read_csv(FactorBarra_Path + "beta.csv")
-                df = pd.merge(df, beta_df, on=['trade_date','stock_code'], how='left')
+                self.df = pd.merge(self.df, beta_df, on=['trade_date','stock_code'], how='left')
                 # 按日期升序排列
-            df.sort_values(by='trade_date', inplace=True)
+            self.df.sort_values(by='trade_date', inplace=True)
             # 按标的分组向后填充空值
-            df['RESVOL'] = df.groupby('stock_code')['RESVOL'].ffill()
-            df['BETA'] = df.groupby('stock_code')['BETA'].ffill()
+            self.df['RESVOL'] = self.df.groupby('stock_code')['RESVOL'].ffill()
+            self.df['BETA'] = self.df.groupby('stock_code')['BETA'].ffill()
             # 截面平均填充
-            df['RESVOL'] = df.groupby('trade_date')['RESVOL'].transform(lambda x: x.fillna(x.mean()))
-            df['BETA'] = df.groupby('trade_date')['BETA'].transform(lambda x: x.fillna(x.mean()))
+            self.df['RESVOL'] = self.df.groupby('trade_date')['RESVOL'].transform(lambda x: x.fillna(x.mean()))
+            self.df['BETA'] = self.df.groupby('trade_date')['BETA'].transform(lambda x: x.fillna(x.mean()))
             # 去除剩余空值
-            df = df.dropna(subset=['RESVOL', 'BETA'])
+            self.df = self.df.dropna(subset=['RESVOL', 'BETA'])
 
-            df['CONSTANT'] = 1
-            orth_function = sm.OLS(df['RESVOL'], df[['BETA', 'CONSTANT']]).fit()
-            df['RESVOL'] = orth_function.resid
-            df = df[['trade_date','stock_code', 'RESVOL']]
-            df.to_csv(FactorBarra_Path + "RESVOL.csv", index=False, encoding='utf-8-sig')
+            self.df['CONSTANT'] = 1
+            orth_function = sm.OLS(self.df['RESVOL'], self.df[['BETA', 'CONSTANT']]).fit()
+            self.df['RESVOL'] = orth_function.resid
+            self.df = self.df[['trade_date','stock_code', 'RESVOL']]
+            self.df.to_csv(FactorBarra_Path + "RESVOL.csv", index=False, encoding='utf-8-sig')
 
-        df = self._preprocess(df, factor_column='RESVOL')
 
-        return df
+        self.df = self._preprocess(self.df, factor_column='RESVOL')
+
+        return self.df
 
 class growth(GetData, Calculation):
     """
@@ -736,15 +756,17 @@ class growth(GetData, Calculation):
 
             self.df = self.df.sort_values(by = 'trade_date')
             self.growth_df = self.growth_df.sort_values(by = 'pubDate')
-
+            self.df['trade_dateT'] = pd.to_datetime(self.df['trade_date'])
+            self.growth_df['pubDateT'] = pd.to_datetime(self.growth_df['pubDate'])
             self.df = pd.merge_asof(
                 self.df,
                 self.growth_df,
                 by='stock_code',
-                left_on='trade_date',
-                right_on='pubDate',
+                left_on='trade_dateT',
+                right_on='pubDateT',
                 direction='backward'
             )
+            self.df['trade_date'] = self.df['trade_date_x']
 
 
             # 去除空值（年报数据不足五年的标的）
@@ -778,7 +800,7 @@ class btop(GetData, Calculation):
         初始化 BTOP 类，载入市净率 (PB) 数据。
         """
         self.valuation = GetData._get_valuation()
-        self.valuation = self.valuation[['trade_date','stock_code','pb_ratio']]
+        self.valuation = self.valuation[['trade_date','stock_code','pb_ratio','market_cap']]
         # self.valuation = pd.to_datetime(self.pb_df['TRADE_DT'])
 
     def BTOP(self, df):
@@ -788,13 +810,20 @@ class btop(GetData, Calculation):
         :param df: 包含股票数据的 DataFrame
         :return: 添加了 BTOP 列并删除市净率 (S_VAL_PB_NEW) 列的 DataFrame
         """
-        df = df.merge(self.valuation, on=['stock_code', 'trade_date'], how='left')
-        df['BTOP'] = 1/df['pb_ratio']
-        df['BTOP'] = df['BTOP'].astype('float')
-        df.drop(columns=['pb_ratio'], inplace=True)
-        df = self._preprocess(df, factor_column = 'BTOP')
-        df['BTOP'] = df.groupby('stock_code')['BTOP'].ffill()
-
+        if os.path.exists(FactorBarra_Path + 'BTOP.csv'):
+            df = pd.read_csv(FactorBarra_Path + 'BTOP.csv')
+        else:
+            df = df.merge(self.valuation, on=['stock_code', 'trade_date'], how='left')
+            df['BTOP'] = 1/df['pb_ratio']
+            df['BTOP'] = df['BTOP'].astype('float')
+            df.drop(columns=['pb_ratio'], inplace=True)
+            # df['BTOP_nonntr'] = df['BTOP'].copy()
+            df = self._preprocess(df, factor_column = 'BTOP')
+            df['BTOP'] = df.groupby('stock_code')['BTOP'].ffill()
+            df['BTOP_wsr'] = df.groupby('stock_code')['BTOP_wsr'].ffill()
+            df['BTOP_pp'] = df.groupby('stock_code')['BTOP_pp'].ffill()
+            df = df[['trade_date','stock_code','BTOP','BTOP_wsr','BTOP_pp']]
+            df.to_csv(FactorBarra_Path + "BTOP.csv", index=False, encoding='utf-8-sig')
         return df
 
 
@@ -820,7 +849,7 @@ class leverage(GetData, Calculation):
         # self.balance_data['statDate_year'] = self.balance_data['statDate'].dt.year
         # self.balance_data['pubDate'] = pd.to_datetime(self.balance_data['pubDate'])
         self.leverage_data = pd.merge(balance_data, valuation, on=['trade_date','stock_code'])
-        self.leverate_data['BPS'] = (self.leverate_data['total_owner_equities'] / self.leverate_data['capitalization']) / 10000
+        self.leverage_data['BPS'] = (self.leverage_data['total_owner_equities'] / self.leverage_data['capitalization']) / 10000
 
 
         # self.ncapital_data = GetData.capital()
@@ -848,7 +877,7 @@ class leverage(GetData, Calculation):
         # 删除不需要的日期标注列
         # self.df = self.df.drop(columns=['ANN_DT_x', 'ANN_DT_y', 'CHANGE_DT'])
         # self.df['PE'] = self.df['S_FA_BPS'] * self.df['S_SHARE_NTRD_PRFSHARE']
-        self.df['ME'] = self.df['S_VAL_MV'].copy()
+        # self.df['ME'] = self.df['market_cap'].copy()
         self.df['BE'] = (self.df['ME'] / self.df['close']) * self.df['BPS']
         self.df.drop(columns=['BPS'], inplace=True)
 
@@ -893,14 +922,17 @@ class leverage(GetData, Calculation):
 
         :return: 更新后的 DataFrame，包含 LEVERAGE 因子
         """
-        self.MLEV()
-        self.DTOA()
-        self.BLEV()
-        self.df['LEVERAGE'] = 0.38 * self.df['MLEV'] + 0.35 * self.df['DTOA'] + 0.27 * self.df['BLEV']
-        self.df = self._preprocess(self.df, 'LEVERAGE')
-        self.df['LEVERAGE'] = self.df.groupby('stock_code')['LEVERAGE'].ffill()
-        self.df['LEVERAGE'] = self.df.groupby('trade_date')['LEVERAGE'].transform(lambda x: x.fillna(x.mean()))
+        if os.path.exists(FactorBarra_Path + 'LEVERAGE.csv'):
+            self.df = pd.read_csv(FactorBarra_Path + 'LEVERAGE.csv')
+        else:
+            self.MLEV()
+            self.DTOA()
+            self.BLEV()
+            self.df['LEVERAGE'] = 0.38 * self.df['MLEV_pp'] + 0.35 * self.df['DTOA_pp'] + 0.27 * self.df['BLEV_pp']
 
+        self.df = self._preprocess(self.df, 'LEVERAGE')
+        self.df['LEVERAGE'] = self.df.groupby('stock_code')['LEVERAGE_pp'].ffill()
+        self.df['LEVERAGE'] = self.df.groupby('trade_date')['LEVERAGE_pp'].transform(lambda x: x.fillna(x.mean()))
         return self.df
 
 
@@ -921,11 +953,11 @@ class liquidity(GetData, Calculation):
         :param df: 股票数据的 DataFrame
         """
         self.market_cap = GetData._get_valuation()
-        market_cap = self.market_cap[['trade_date', 'code', 'circulating_cap']]
+        market_cap = self.market_cap[['trade_date', 'code', 'circulating_cap','market_cap']]
         df['close_fq'] = df['close'] * df['factor']
         self.all_mkt_turnover = pd.merge(df, market_cap, on=['trade_date', 'code'], how='left')
         self.all_mkt_turnover['turnover'] = (self.all_mkt_turnover['volume'] / 10000) / self.all_mkt_turnover['circulating_cap']
-        self.all_mkt_turnover = self.all_mkt_turnover[['trade_date','stock','turnover']]
+        self.all_mkt_turnover = self.all_mkt_turnover[['trade_date','stock_code','turnover','market_cap']]
         self.all_mkt_turnover = self.all_mkt_turnover.sort_values(by='trade_date')
 
     def LIQUIDITY(self):
@@ -938,22 +970,25 @@ class liquidity(GetData, Calculation):
 
         :return: 包含计算出的 LIQUIDITY 因子的 DataFrame
         """
-        grouped = self.all_mkt_turnover.groupby('stock_code').filter(lambda x: len(x) >= 252)
-        grouped['STOM'] = grouped.groupby('stock_code')['turnover'].rolling(window=21).sum().apply(
-            lambda x: np.log(x)).reset_index(level=0, drop=True)
-        grouped['STOQ'] = grouped.groupby('stock_code')['turnover'].rolling(window=63).sum().apply(
-            lambda x: np.log(1 / 3 * x)).reset_index(level=0, drop=True)
-        grouped['STOA'] = grouped.groupby('stock_code')['turnover'].rolling(window=252).sum().apply(
-            lambda x: np.log(1 / 12 * x)).reset_index(level=0, drop=True)
+        if os.path.exists(FactorBarra_Path + 'LIQUIDITY.csv'):
+            df = pd.read_csv(FactorBarra_Path + 'LIQUIDITY.csv')
+        else:
+            grouped = self.all_mkt_turnover.groupby('stock_code').filter(lambda x: len(x) >= 252)
+            grouped['STOM'] = grouped.groupby('stock_code')['turnover'].rolling(window=21).sum().apply(
+                lambda x: np.log(x)).reset_index(level=0, drop=True)
+            grouped['STOQ'] = grouped.groupby('stock_code')['turnover'].rolling(window=63).sum().apply(
+                lambda x: np.log(1 / 3 * x)).reset_index(level=0, drop=True)
+            grouped['STOA'] = grouped.groupby('stock_code')['turnover'].rolling(window=252).sum().apply(
+                lambda x: np.log(1 / 12 * x)).reset_index(level=0, drop=True)
 
-        grouped['LIQUIDITY'] = 0.35 * grouped['STOM'] + 0.35 * grouped['STOQ'] + 0.3 * grouped['STOA']
+            grouped['LIQUIDITY'] = 0.35 * grouped['STOM'] + 0.35 * grouped['STOQ'] + 0.3 * grouped['STOA']
 
-        result = grouped.groupby('stock_code').apply(lambda x: x.iloc[251:]).reset_index(drop=True)
-        result = result[~result['LIQUIDITY'].isna()]
+            result = grouped.groupby('stock_code').apply(lambda x: x.iloc[251:]).reset_index(drop=True)
+            result = result[~result['LIQUIDITY'].isna()]
 
-        df = self._preprocess(data=result, factor_column='LIQUIDITY')
-        df['LIQUIDITY'] = df.groupby('stock_code')['LIQUIDITY'].ffill()
-        df = df[~df['LIQUIDITY'].isna()]
+            df = self._preprocess(data=result, factor_column='LIQUIDITY')
+            df['LIQUIDITY'] = df.groupby('stock_code')['LIQUIDITY'].ffill()
+            df = df[~df['LIQUIDITY'].isna()]
 
         return df
 
@@ -1064,13 +1099,37 @@ class EarningsYield(GetData, Calculation):
 if __name__ == '__main__':
     total_data = GetData._get_price_()
     # total_data = total_data[total_data['year']>=2016]
-    # valuation_data = GetData._get_valuation()
+    valuation_data = GetData._get_valuation()
     # size_calculator = Size()
-    #
+
+    #更新beta
     # Beta_data = Beta(total_data)
     # beta_df = Beta_data.beta_df
+    #
+    # # 更新BTOP
+    # bp_calculator = btop()
+    # btop_df = bp_calculator.BTOP(total_data)
 
-    growth_data = growth(total_data, 2009)
-    df = growth_data.GROWTH()
+    # 更新残差波动率RESVOL 需要beta 计算
+    # calculate_resvol = ResidualVolatility(total_data)
+    # resvol_df = calculate_resvol.RESVOL()
+
+    # 更新动量RSTR
+    # calculate_mom = Momentum()
+    # rstr_df = calculate_mom.RSTR(total_data)
+    #
+    #
+    # growth_data = growth(total_data, 2009)
+    # df = growth_data.GROWTH()
+
+    # size_calculator = Size()
+    # lncap_df = size_calculator.LNCAP(valuation_data)
+    # nlsize_df = size_calculator.NLSIZE(lncap_df)
+
+    # leverage_calculator = leverage(total_data)
+    # leverage_df = leverage_calculator.LEVERAGE()
+
+    liquidity_calculator = liquidity(total_data)
+    liquidity_df = liquidity_calculator.LIQUIDITY()
 
     print("test")

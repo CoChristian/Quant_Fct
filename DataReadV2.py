@@ -47,27 +47,44 @@ except Exception as e:
 # 示例2：从 quantdb_time_sliced 数据库读取数据
 # read all data
 # price_history_data
-prefix = 'income'
+prefix = 'index_stock_relation'
 df_vertical = pd.DataFrame()
 
 # 构建一次性查询所有表的SQL
-table_names = [f"{prefix}{i:02d}" for i in range(5, 26)]
-union_queries = []
+table_names = []
+years = range(2005, 2026)  # 假设年份从2020到2023
+months = range(1, 13)      # 1-12月
 
-for table_name in table_names:
-    union_queries.append(f"SELECT DISTINCT, '{table_name}' as source_table FROM {table_name}")
+index_symbol = '000905.XSHG'
+df_index = pd.DataFrame()
+for year in years:
+    for month in months:
+        if (year == 2025) and (month > 10):
+            break
+        str_year = str(year)[-2:]
+        table_name = f"{prefix}{str_year}{month:02d}"
+        try:
+            df_single =  pd.read_sql(f"SELECT * FROM {table_name} WHERE exponentcode = '{index_symbol}'", con=engine_time_sliced)
+            df_index = pd.concat([df_index, df_single])
+        except Exception as e:
+            print(f"批量读取数据时出错: {e}")
 
-# 一次性查询所有数据
-combined_query = " UNION ALL ".join(union_queries)
 
-try:
-    df_vertical = pd.read_sql(combined_query, con=engine_time_sliced)
-    print(f"成功读取所有表数据，总行数: {len(df_vertical)}")
-except Exception as e:
-    print(f"批量读取数据时出错: {e}")
+# union_queries = []
+# for table_name in tqdm(table_names):
+#     union_queries.append(f"SELECT *, '{table_name}' as source_table FROM {table_name} WHERE exponentcode = '{index_symbol}'")
+#
+# # 一次性查询所有数据
+# combined_query = " UNION ALL ".join(union_queries)
+#
+# try:
+#     df_vertical = pd.read_sql(combined_query, con=engine_time_sliced)
+#     print(f"成功读取所有表数据，总行数: {len(df_vertical)}")
+# except Exception as e:
+#     print(f"批量读取数据时出错: {e}")
 
 
-
+print("test")
 
 
 # for i in tqdm(range(5,26)):
