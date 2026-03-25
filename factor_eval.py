@@ -52,7 +52,7 @@ if __name__ == "__main__":
     factor = get_factor_table(20240101, 20251231)
     opt2trade_date = get_opt2trade_table(20231220, 20260110)
     price_table = get_price_table(20231220, 2026110)
-
+    # test
     # 周频换仓
     weekly_price = pd.merge(opt2trade_date, price_table, left_on='trade_date', right_on='trade_date_price', how='right')
     weekly_price.sort_values(by=['trade_date','code'], inplace=True)
