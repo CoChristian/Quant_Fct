@@ -48,4 +48,27 @@ def get_opt2trade_table(start_date, end_date):
     return date_table
 
 
+if __name__ == "__main__":
+    factor = get_factor_table(20240101, 20251231)
+    opt2trade_date = get_opt2trade_table(20231220, 20260110)
+    price_table = get_price_table(20231220, 2026110)
+
+    # 周频换仓
+    weekly_price = pd.merge(opt2trade_date, price_table, left_on='trade_date', right_on='trade_date_price', how='right')
+    weekly_price.sort_values(by=['trade_date','code'], inplace=True)
+    weekly_price['ret'] = weekly_price.groupby('code')['close0935'].pct_change().values
+    weekly_factor = pd.merge(factor, weekly_price, left_on=['trade_date','code'], right_on=['opt_date','code'], how='right')
+
+    factor_df = weekly_factor[['trade_date','code','fct_value']].copy()
+    ret_df = weekly_factor[['trade_date','code', 'ret']].copy()
+
+    factor_name = 'fct_value'
+    # factor_df = preprocess.del_outlier(factor_df, factor_name, method='mad', n=3)
+    # # 排序标准化
+    # factor_df = preprocess.standardize(factor_df, factor_name, method='rank')
+
+    mw_group_ret = group_calc.get_group_ret(factor_df, ret_df, factor_name, 10, mkmtv=None)
+
+
+
 
